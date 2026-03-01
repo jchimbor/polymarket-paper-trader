@@ -387,11 +387,11 @@ def stats(ctx: click.Context, card: bool, plain: bool, tweet: bool) -> None:
             from pm_trader.card import generate_card, generate_card_plain, generate_tweet
             account_name = ctx.obj["account"]
             if tweet:
-                click.echo(generate_tweet(result, account_name))
+                click.echo(generate_tweet(result, account_name, portfolio))
             elif plain:
-                click.echo(generate_card_plain(result, account_name))
+                click.echo(generate_card_plain(result, account_name, portfolio))
             else:
-                click.echo(generate_card(result, account_name))
+                click.echo(generate_card(result, account_name, portfolio))
         else:
             click.echo(_ok(result))
     except SimError as e:

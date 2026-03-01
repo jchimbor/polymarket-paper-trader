@@ -37,6 +37,7 @@ from pm_trader.mcp_server import (
     resolve_all,
     search_markets,
     sell,
+    share_content,
     stats,
     stats_card,
     watch_prices,
@@ -231,6 +232,50 @@ class TestPkCard:
 
     def test_pk_not_initialized(self):
         result = _parse(pk_card(account_a="nope", account_b="nada"))
+        assert result["ok"] is False
+
+
+# ---------------------------------------------------------------------------
+# share_content tool
+# ---------------------------------------------------------------------------
+
+
+class TestShareContent:
+    def test_twitter_performance(self):
+        init_account()
+        result = _parse(share_content(platform="twitter", template="performance"))
+        assert result["ok"] is True
+        assert "card" in result["data"]
+        assert result["data"]["platform"] == "twitter"
+        assert result["data"]["template"] == "performance"
+        assert "#Polymarket" in result["data"]["card"]
+
+    def test_telegram_performance(self):
+        init_account()
+        result = _parse(share_content(platform="telegram", template="performance"))
+        assert result["ok"] is True
+        assert "*" in result["data"]["card"]  # markdown
+
+    def test_plain_performance(self):
+        init_account()
+        result = _parse(share_content(platform="plain", template="performance"))
+        assert result["ok"] is True
+        assert "*" not in result["data"]["card"]
+
+    def test_milestone_template(self):
+        init_account()
+        result = _parse(share_content(template="milestone"))
+        assert result["ok"] is True
+        assert "#Milestone" in result["data"]["card"]
+
+    def test_daily_template(self):
+        init_account()
+        result = _parse(share_content(template="daily"))
+        assert result["ok"] is True
+        assert "Daily Report" in result["data"]["card"]
+
+    def test_not_initialized(self):
+        result = _parse(share_content(account="nonexistent"))
         assert result["ok"] is False
 
 

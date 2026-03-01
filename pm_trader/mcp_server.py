@@ -414,11 +414,11 @@ def stats_card(account: str = "default", format: str = "markdown") -> str:
 
         result = compute_stats(trades, acct, positions_value)
         if format == "tweet":
-            card = generate_tweet(result, account)
+            card = generate_tweet(result, account, portfolio_items)
         elif format == "plain":
-            card = generate_card_plain(result, account)
+            card = generate_card_plain(result, account, portfolio_items)
         else:
-            card = generate_card(result, account)
+            card = generate_card(result, account, portfolio_items)
         return _ok({"card": card, "stats": result})
     except Exception as e:
         return _err(str(e), type(e).__name__)
@@ -461,6 +461,53 @@ def leaderboard_entry(account: str = "default") -> str:
             "open_positions": len(portfolio_items),
             "qualified": result.get("total_trades", 0) >= 10,
         })
+    except Exception as e:
+        return _err(str(e), type(e).__name__)
+
+
+@mcp.tool()
+def share_content(
+    account: str = "default",
+    platform: str = "twitter",
+    template: str = "performance",
+) -> str:
+    """Generate shareable content optimized for a specific platform and template.
+
+    platform: "twitter" (X), "telegram", "discord", "plain"
+    template: "performance" (stats overview), "milestone" (achievement),
+              "daily" (daily report with positions)
+
+    Each platform gets appropriately formatted content with hashtags and install CTA.
+    """
+    try:
+        from pm_trader.analytics import compute_stats
+        from pm_trader.card import (
+            generate_card,
+            generate_card_plain,
+            generate_daily_report,
+            generate_milestone_tweet,
+            generate_tweet,
+        )
+
+        engine = _get_engine(account)
+        acct = engine.get_account()
+        trades = engine.db.get_trades(limit=10_000)
+        portfolio_items = engine.get_portfolio()
+        positions_value = sum(p["current_value"] for p in portfolio_items)
+        result = compute_stats(trades, acct, positions_value)
+
+        if template == "milestone":
+            card = generate_milestone_tweet(result)
+        elif template == "daily":
+            card = generate_daily_report(result, portfolio_items, account)
+        elif platform == "twitter":
+            card = generate_tweet(result, account, portfolio_items)
+        elif platform == "plain":
+            card = generate_card_plain(result, account, portfolio_items)
+        else:
+            card = generate_card(result, account, portfolio_items)
+
+        return _ok({"card": card, "platform": platform, "template": template})
     except Exception as e:
         return _err(str(e), type(e).__name__)
 
