@@ -442,6 +442,38 @@ def leaderboard(ctx: click.Context) -> None:
         engine.close()
 
 
+@main.command()
+@click.argument("account_a")
+@click.argument("account_b")
+@click.pass_context
+def pk(ctx: click.Context, account_a: str, account_b: str) -> None:
+    """Head-to-head PK comparison between two accounts."""
+    from pm_trader.analytics import compute_stats
+    from pm_trader.card import generate_pk_card
+
+    base = ctx.obj.get("data_dir") or Path.home() / ".pm-trader"
+
+    try:
+        results = {}
+        for name in (account_a, account_b):
+            data_dir = base / name
+            engine = Engine(data_dir)
+            try:
+                account = engine.get_account()
+                trades = engine.get_history(limit=10_000)
+                portfolio = engine.get_portfolio()
+                positions_value = sum(p["current_value"] for p in portfolio)
+                results[name] = compute_stats(trades, account, positions_value)
+            finally:
+                engine.close()
+
+        card = generate_pk_card(results[account_a], account_a, results[account_b], account_b)
+        click.echo(card)
+    except SimError as e:
+        click.echo(_err(e))
+        sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # Export commands
 # ---------------------------------------------------------------------------

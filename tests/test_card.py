@@ -5,8 +5,10 @@ from __future__ import annotations
 from pm_trader.card import (
     _extract,
     _roi_icon,
+    _tier,
     generate_card,
     generate_card_plain,
+    generate_pk_card,
     generate_tweet,
 )
 
@@ -184,3 +186,61 @@ class TestGenerateCardPlain:
         card = generate_card_plain({})
         assert "ROI:       +0.0%" in card
         assert "clawhub" in card
+
+
+# ---------------------------------------------------------------------------
+# _tier
+# ---------------------------------------------------------------------------
+
+
+class TestTier:
+    def test_diamond(self):
+        stats = {"total_trades": 60, "roi_pct": 25.0, "sharpe_ratio": 2.0}
+        assert "Diamond" in _tier(stats)
+
+    def test_gold(self):
+        stats = {"total_trades": 35, "roi_pct": 12.0, "sharpe_ratio": 1.2}
+        assert "Gold" in _tier(stats)
+
+    def test_silver(self):
+        stats = {"total_trades": 25, "roi_pct": 8.0, "sharpe_ratio": 0.5}
+        assert "Silver" in _tier(stats)
+
+    def test_bronze(self):
+        stats = {"total_trades": 12, "roi_pct": -5.0, "sharpe_ratio": -0.3}
+        assert "Bronze" in _tier(stats)
+
+    def test_unranked(self):
+        stats = {"total_trades": 3}
+        assert "Unranked" in _tier(stats)
+
+
+# ---------------------------------------------------------------------------
+# generate_pk_card
+# ---------------------------------------------------------------------------
+
+
+class TestGeneratePkCard:
+    def test_basic_pk(self):
+        a = {"roi_pct": 15.0, "pnl": 1500.0, "sharpe_ratio": 1.5, "win_rate": 0.7, "total_trades": 30}
+        b = {"roi_pct": 8.0, "pnl": 800.0, "sharpe_ratio": 0.9, "win_rate": 0.55, "total_trades": 20}
+        card = generate_pk_card(a, "alice", b, "bob")
+        assert "alice" in card
+        assert "bob" in card
+        assert "+15.0%" in card
+        assert "+8.0%" in card
+        assert "alice wins" in card
+        assert "#PK" in card
+        assert "clawhub" in card
+
+    def test_b_wins(self):
+        a = {"roi_pct": 3.0}
+        b = {"roi_pct": 12.0}
+        card = generate_pk_card(a, "slow", b, "fast")
+        assert "fast wins" in card
+
+    def test_tie(self):
+        a = {"roi_pct": 10.0}
+        b = {"roi_pct": 10.0}
+        card = generate_pk_card(a, "x", b, "y")
+        assert "Tie" in card

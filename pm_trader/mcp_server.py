@@ -465,6 +465,39 @@ def leaderboard_entry(account: str = "default") -> str:
         return _err(str(e), type(e).__name__)
 
 
+@mcp.tool()
+def pk_card(account_a: str = "default", account_b: str = "aggressive") -> str:
+    """Generate a head-to-head PK comparison card between two accounts.
+
+    Compares ROI, Sharpe, win rate, trades, and tier. Outputs a tweet-ready
+    card with winner announcement. Great for rivalry and sharing.
+    """
+    try:
+        from pm_trader.analytics import compute_stats
+        from pm_trader.card import generate_pk_card
+
+        results = {}
+        for name in (account_a, account_b):
+            engine = _get_engine(name)
+            acct = engine.get_account()
+            trades = engine.db.get_trades(limit=10_000)
+            portfolio_items = engine.get_portfolio()
+            positions_value = sum(p["current_value"] for p in portfolio_items)
+            results[name] = compute_stats(trades, acct, positions_value)
+
+        card = generate_pk_card(
+            results[account_a], account_a,
+            results[account_b], account_b,
+        )
+        return _ok({
+            "card": card,
+            account_a: results[account_a],
+            account_b: results[account_b],
+        })
+    except Exception as e:
+        return _err(str(e), type(e).__name__)
+
+
 # ---------------------------------------------------------------------------
 # Resolution tools
 # ---------------------------------------------------------------------------

@@ -389,6 +389,30 @@ class TestLeaderboardCommand:
         assert data["ok"] is False
 
 
+class TestPkCommand:
+    @patch("pm_trader.engine.PolymarketClient")
+    def test_pk_two_accounts(self, MockClient, runner, tmp_path):
+        # --data-dir sets the base, --account sets subdir under it
+        base = tmp_path / "pk-base"
+        base.mkdir()
+        runner.invoke(main, ["--data-dir", str(base), "--account", "alice", "init"])
+        runner.invoke(main, ["--data-dir", str(base), "--account", "bob", "init"])
+        result = runner.invoke(
+            main, ["--data-dir", str(base), "pk", "alice", "bob"],
+        )
+        assert result.exit_code == 0
+        assert "PK" in result.output
+        assert "alice" in result.output
+        assert "bob" in result.output
+
+    @patch("pm_trader.engine.PolymarketClient")
+    def test_pk_not_initialized(self, MockClient, runner, tmp_path):
+        base = tmp_path / "pk-empty"
+        base.mkdir()
+        result = runner.invoke(main, ["--data-dir", str(base), "pk", "nope", "nada"])
+        assert result.exit_code == 1
+
+
 # ---------------------------------------------------------------------------
 # Export commands
 # ---------------------------------------------------------------------------

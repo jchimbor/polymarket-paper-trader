@@ -29,6 +29,7 @@ from pm_trader.mcp_server import (
     leaderboard_entry,
     list_markets,
     list_orders,
+    pk_card,
     place_limit_order,
     portfolio,
     reset_account,
@@ -214,6 +215,22 @@ class TestLeaderboardEntry:
 
     def test_not_initialized(self):
         result = _parse(leaderboard_entry())
+        assert result["ok"] is False
+
+
+class TestPkCard:
+    def test_pk_two_accounts(self):
+        init_account(balance=10_000.0, account="alice")
+        init_account(balance=10_000.0, account="bob")
+        result = _parse(pk_card(account_a="alice", account_b="bob"))
+        assert result["ok"] is True
+        assert "card" in result["data"]
+        assert "alice" in result["data"]["card"]
+        assert "bob" in result["data"]["card"]
+        assert "#PK" in result["data"]["card"]
+
+    def test_pk_not_initialized(self):
+        result = _parse(pk_card(account_a="nope", account_b="nada"))
         assert result["ok"] is False
 
 
