@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+from pm_sim.models import (
+    Market,
+    OrderBook,
+    OrderBookLevel,
+    Trade,
+)
 
 from pm_sim import mcp_server
 from pm_sim.mcp_server import (
@@ -180,3 +187,310 @@ class TestErrorEnvelope:
     def test_stats_not_initialized(self):
         result = _parse(stats())
         assert result["ok"] is False
+
+
+# ---------------------------------------------------------------------------
+# Market data tools (with API mocks)
+# ---------------------------------------------------------------------------
+
+SAMPLE_MARKET = Market(
+    condition_id="0xabc123",
+    slug="will-bitcoin-hit-100k",
+    question="Will Bitcoin hit $100k?",
+    description="BTC market",
+    outcomes=["Yes", "No"],
+    outcome_prices=[0.65, 0.35],
+    tokens=[
+        {"token_id": "tok_yes", "outcome": "Yes"},
+        {"token_id": "tok_no", "outcome": "No"},
+    ],
+    active=True,
+    closed=False,
+    volume=5_000_000.0,
+    liquidity=250_000.0,
+    end_date="2026-12-31",
+    fee_rate_bps=0,
+    tick_size=0.01,
+)
+
+SAMPLE_BOOK = OrderBook(
+    bids=[OrderBookLevel(0.64, 500), OrderBookLevel(0.63, 500)],
+    asks=[OrderBookLevel(0.66, 500), OrderBookLevel(0.67, 500)],
+)
+
+
+def _mock_engine_api(engine):
+    """Set up API mocks on an engine instance."""
+    engine.api.get_market = MagicMock(return_value=SAMPLE_MARKET)
+    engine.api.search_markets = MagicMock(return_value=[SAMPLE_MARKET])
+    engine.api.list_markets = MagicMock(return_value=[SAMPLE_MARKET])
+    engine.api.get_order_book = MagicMock(return_value=SAMPLE_BOOK)
+    engine.api.get_midpoint = MagicMock(return_value=0.65)
+    engine.api.get_fee_rate = MagicMock(return_value=0)
+
+
+class TestSearchMarkets:
+    def test_search(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(search_markets("bitcoin"))
+        assert result["ok"] is True
+        assert len(result["data"]) == 1
+        assert result["data"][0]["slug"] == "will-bitcoin-hit-100k"
+
+    def test_search_with_limit(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(search_markets("bitcoin", limit=5))
+        assert result["ok"] is True
+
+
+class TestListMarkets:
+    def test_list_default(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(list_markets())
+        assert result["ok"] is True
+        assert len(result["data"]) >= 1
+        assert result["data"][0]["question"] == "Will Bitcoin hit $100k?"
+
+    def test_list_by_liquidity(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(list_markets(sort_by="liquidity"))
+        assert result["ok"] is True
+
+
+class TestGetMarket:
+    def test_found(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(get_market("will-bitcoin-hit-100k"))
+        assert result["ok"] is True
+        assert result["data"]["condition_id"] == "0xabc123"
+        assert result["data"]["outcomes"] == ["Yes", "No"]
+
+    def test_not_found(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        engine = _get_engine()
+        from pm_sim.models import MarketNotFoundError
+        engine.api.get_market = MagicMock(side_effect=MarketNotFoundError("nope"))
+        result = _parse(get_market("nope"))
+        assert result["ok"] is False
+        assert result["code"] == "market_not_found"
+
+
+class TestGetOrderBook:
+    def test_order_book(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(get_order_book("will-bitcoin-hit-100k", "yes"))
+        assert result["ok"] is True
+        assert len(result["data"]["bids"]) == 2
+        assert len(result["data"]["asks"]) == 2
+
+    def test_order_book_error(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        engine = _get_engine()
+        engine.api.get_market = MagicMock(side_effect=Exception("network"))
+        result = _parse(get_order_book("bad", "yes"))
+        assert result["ok"] is False
+
+
+class TestWatchPrices:
+    def test_watch(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(watch_prices("will-bitcoin-hit-100k"))
+        assert result["ok"] is True
+        assert len(result["data"]) >= 1
+        assert result["data"][0]["midpoint"] == 0.65
+
+    def test_watch_invalid_outcome_returns_error(self):
+        """Invalid outcome causes ValueError from get_token_id."""
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        engine = _get_engine()
+        # Market resolves but has no token for 'invalid'
+        bad_market = Market(
+            condition_id="0x1", slug="m", question="Q", description="",
+            outcomes=["Yes", "No"],
+            outcome_prices=[0.5, 0.5],
+            tokens=[{"token_id": "t1", "outcome": "Yes"}, {"token_id": "t2", "outcome": "No"}],
+            active=True, closed=False,
+        )
+        engine.api.get_market = MagicMock(return_value=bad_market)
+        result = _parse(watch_prices("m", "invalid"))
+        assert result["ok"] is False
+        assert result["code"] == "ValueError"
+
+
+# ---------------------------------------------------------------------------
+# Trading tools (with API mocks)
+# ---------------------------------------------------------------------------
+
+
+class TestBuyTool:
+    def test_buy_success(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(buy("will-bitcoin-hit-100k", "yes", 100.0))
+        assert result["ok"] is True
+        assert result["data"]["trade"]["side"] == "buy"
+        assert result["data"]["trade"]["outcome"] == "yes"
+        assert result["data"]["account"]["cash"] < 10_000.0
+
+    def test_buy_not_initialized(self):
+        result = _parse(buy("btc", "yes", 100.0))
+        assert result["ok"] is False
+        assert result["code"] == "NotInitializedError"
+
+    def test_buy_insufficient_balance(self):
+        init_account(balance=1.0)
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(buy("will-bitcoin-hit-100k", "yes", 100_000.0))
+        assert result["ok"] is False
+
+    def test_buy_invalid_outcome(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(buy("will-bitcoin-hit-100k", "maybe", 100.0))
+        assert result["ok"] is False
+        assert result["code"] == "InvalidOutcomeError"
+
+
+class TestSellTool:
+    def test_sell_no_position(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(sell("will-bitcoin-hit-100k", "yes", 10.0))
+        assert result["ok"] is False
+        assert result["code"] == "NoPositionError"
+
+    def test_sell_after_buy(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        buy("will-bitcoin-hit-100k", "yes", 100.0)
+        result = _parse(sell("will-bitcoin-hit-100k", "yes", 10.0))
+        assert result["ok"] is True
+        assert result["data"]["trade"]["side"] == "sell"
+
+
+class TestHistoryWithData:
+    def test_history_after_trade(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        buy("will-bitcoin-hit-100k", "yes", 50.0)
+        result = _parse(history())
+        assert result["ok"] is True
+        assert len(result["data"]) == 1
+        assert result["data"][0]["created_at"] is not None
+        assert result["data"][0]["side"] == "buy"
+
+
+class TestPortfolioWithData:
+    def test_portfolio_after_trade(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        buy("will-bitcoin-hit-100k", "yes", 50.0)
+        result = _parse(portfolio())
+        assert result["ok"] is True
+        assert len(result["data"]) == 1
+        assert result["data"][0]["outcome"] == "yes"
+
+
+# ---------------------------------------------------------------------------
+# Limit order tools (with API mocks)
+# ---------------------------------------------------------------------------
+
+
+class TestPlaceLimitOrder:
+    def test_place_gtc(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(place_limit_order(
+            "will-bitcoin-hit-100k", "yes", "buy", 100.0, 0.55,
+        ))
+        assert result["ok"] is True
+        assert result["data"]["status"] == "pending"
+        assert result["data"]["limit_price"] == 0.55
+
+    def test_place_gtd(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(place_limit_order(
+            "will-bitcoin-hit-100k", "yes", "buy", 100.0, 0.55,
+            order_type="gtd", expires_at="2027-01-01T00:00:00Z",
+        ))
+        assert result["ok"] is True
+        assert result["data"]["order_type"] == "gtd"
+
+    def test_place_invalid_side(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(place_limit_order(
+            "will-bitcoin-hit-100k", "yes", "hold", 100.0, 0.55,
+        ))
+        assert result["ok"] is False
+
+    def test_place_invalid_order_type(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        result = _parse(place_limit_order(
+            "will-bitcoin-hit-100k", "yes", "buy", 100.0, 0.55,
+            order_type="bad",
+        ))
+        assert result["ok"] is False
+
+
+class TestResolve:
+    def test_resolve_no_position(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        engine = _get_engine()
+        from pm_sim.models import NoPositionError
+        engine.api.get_market = MagicMock(side_effect=NoPositionError("m", "yes"))
+        result = _parse(resolve("m"))
+        assert result["ok"] is False
+
+
+# ---------------------------------------------------------------------------
+# Multi-account tools
+# ---------------------------------------------------------------------------
+
+
+class TestMultiAccount:
+    def test_separate_accounts(self):
+        result1 = _parse(init_account(balance=5_000.0, account="alice"))
+        assert result1["ok"] is True
+        assert result1["data"]["cash"] == 5_000.0
+
+        result2 = _parse(init_account(balance=20_000.0, account="bob"))
+        assert result2["ok"] is True
+        assert result2["data"]["cash"] == 20_000.0
+
+        bal1 = _parse(get_balance(account="alice"))
+        assert bal1["data"]["cash"] == 5_000.0
+
+        bal2 = _parse(get_balance(account="bob"))
+        assert bal2["data"]["cash"] == 20_000.0
