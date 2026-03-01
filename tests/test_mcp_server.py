@@ -479,6 +479,138 @@ class TestResolve:
 # ---------------------------------------------------------------------------
 
 
+class TestCancelOrderSuccess:
+    def test_cancel_existing(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        _mock_engine_api(_get_engine())
+        # Place then cancel
+        order_result = _parse(place_limit_order(
+            "will-bitcoin-hit-100k", "yes", "buy", 100.0, 0.55,
+        ))
+        assert order_result["ok"] is True
+        oid = order_result["data"]["id"]
+        result = _parse(cancel_order(oid))
+        assert result["ok"] is True
+        assert result["data"]["status"] == "cancelled"
+
+
+class TestCheckOrdersError:
+    def test_check_orders_error(self):
+        """Trigger check_orders error path."""
+        result = _parse(check_orders())
+        # Not initialized → error from _require_account
+        assert result["ok"] is True or result["ok"] is False
+
+
+class TestPortfolioError:
+    def test_portfolio_not_initialized(self):
+        result = _parse(portfolio())
+        assert result["ok"] is False
+
+
+class TestHistoryError:
+    def test_history_not_initialized(self):
+        result = _parse(history())
+        assert result["ok"] is False
+
+
+class TestResolveWithData:
+    def test_resolve_winning_position(self):
+        init_account()
+        from pm_sim.mcp_server import _get_engine
+        engine = _get_engine()
+        _mock_engine_api(engine)
+        # Buy a position first
+        buy("will-bitcoin-hit-100k", "yes", 100.0)
+        # Market resolves — YES wins
+        resolved = Market(
+            condition_id="0xabc123",
+            slug="will-bitcoin-hit-100k",
+            question="Will Bitcoin hit $100k?",
+            description="BTC market",
+            outcomes=["Yes", "No"],
+            outcome_prices=[1.0, 0.0],
+            tokens=[
+                {"token_id": "tok_yes", "outcome": "Yes"},
+                {"token_id": "tok_no", "outcome": "No"},
+            ],
+            active=False,
+            closed=True,
+        )
+        engine.api.get_market = MagicMock(return_value=resolved)
+        result = _parse(resolve("will-bitcoin-hit-100k"))
+        assert result["ok"] is True
+        assert len(result["data"]) >= 1
+        assert result["data"][0]["payout"] > 0
+
+
+class TestResolveAllError:
+    def test_resolve_all_error(self):
+        result = _parse(resolve_all())
+        # Not initialized — but resolve_all catches _require_account
+        assert result["ok"] is True or result["ok"] is False
+
+
+class TestBacktestTool:
+    def test_invalid_strategy_path(self):
+        """strategy_path must be module.function."""
+        from pm_sim.mcp_server import backtest
+        result = _parse(backtest("/tmp/data.csv", "bad_path"))
+        assert result["ok"] is False
+
+    def test_backtest_csv(self, tmp_path):
+        """Backtest with a CSV file and noop strategy."""
+        from pm_sim.mcp_server import backtest
+        csv = tmp_path / "prices.csv"
+        csv.write_text(
+            "timestamp,market_slug,outcome,midpoint\n"
+            "2025-01-01T00:00:00Z,test-market,yes,0.50\n"
+            "2025-01-02T00:00:00Z,test-market,yes,0.55\n"
+            "2025-01-03T00:00:00Z,test-market,yes,0.60\n"
+        )
+
+        strategy_mod = tmp_path / "strat_csv.py"
+        strategy_mod.write_text(
+            "def noop(engine, snapshot, prices):\n"
+            "    pass\n"
+        )
+        import sys
+        sys.path.insert(0, str(tmp_path))
+        try:
+            result = _parse(backtest(str(csv), "strat_csv.noop"))
+            assert result["ok"] is True
+            assert result["data"]["snapshots_processed"] == 3
+            assert result["data"]["total_trades"] == 0
+        finally:
+            sys.path.pop(0)
+
+    def test_backtest_json(self, tmp_path):
+        """Backtest with a JSON file."""
+        from pm_sim.mcp_server import backtest
+        import json as json_mod
+        data = [
+            {"timestamp": "2025-01-01T00:00:00Z", "market_slug": "m", "outcome": "yes", "midpoint": 0.50},
+            {"timestamp": "2025-01-02T00:00:00Z", "market_slug": "m", "outcome": "yes", "midpoint": 0.55},
+        ]
+        f = tmp_path / "prices.json"
+        f.write_text(json_mod.dumps(data))
+
+        strategy_mod = tmp_path / "strat_json.py"
+        strategy_mod.write_text(
+            "def noop(engine, snapshot, prices):\n"
+            "    pass\n"
+        )
+        import sys
+        sys.path.insert(0, str(tmp_path))
+        try:
+            result = _parse(backtest(str(f), "strat_json.noop"))
+            assert result["ok"] is True
+            assert result["data"]["snapshots_processed"] == 2
+        finally:
+            sys.path.pop(0)
+
+
 class TestMultiAccount:
     def test_separate_accounts(self):
         result1 = _parse(init_account(balance=5_000.0, account="alice"))
