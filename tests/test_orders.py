@@ -60,7 +60,20 @@ class TestCreateOrder:
         expires = "2026-03-01T00:00:00Z"
         order = _create(conn, order_type="gtd", expires_at=expires)
         assert order.order_type == "gtd"
-        assert order.expires_at == expires
+        # Z is normalized to +00:00 for consistent TEXT comparison
+        assert order.expires_at == "2026-03-01T00:00:00+00:00"
+
+    def test_gtd_z_and_plus00_are_equivalent(self, conn):
+        """Bug #5: 'Z' and '+00:00' must be treated as the same instant."""
+        from pm_sim.orders import expire_orders
+        from datetime import datetime, timezone
+        # Create an order with Z-suffix that has already expired
+        order = _create(
+            conn, order_type="gtd", expires_at="2020-01-01T00:00:00Z",
+        )
+        expired = expire_orders(conn)
+        assert len(expired) == 1
+        assert expired[0].id == order.id
 
 
 class TestGetPendingOrders:

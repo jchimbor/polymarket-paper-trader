@@ -15,6 +15,17 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 
+def _normalize_timestamp(ts: str) -> str:
+    """Normalize an ISO timestamp to a consistent format for TEXT comparison.
+
+    Replaces 'Z' suffix with '+00:00' and ensures the string sorts correctly
+    as TEXT in SQLite.
+    """
+    if ts.endswith("Z"):
+        ts = ts[:-1] + "+00:00"
+    return ts
+
+
 @dataclass
 class LimitOrder:
     """A pending limit order."""
@@ -69,6 +80,7 @@ def create_order(
     expires_at: str | None = None,
 ) -> LimitOrder:
     """Create a new pending limit order."""
+    normalized_expires = _normalize_timestamp(expires_at) if expires_at else None
     cursor = conn.execute(
         """\
         INSERT INTO limit_orders (
@@ -77,7 +89,7 @@ def create_order(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (market_slug, market_condition_id, outcome, side,
-         amount, limit_price, order_type, expires_at),
+         amount, limit_price, order_type, normalized_expires),
     )
     conn.commit()
     return _get_order(conn, cursor.lastrowid)
@@ -131,7 +143,7 @@ def reject_order(conn: sqlite3.Connection, order_id: int) -> LimitOrder:
 
 def expire_orders(conn: sqlite3.Connection) -> list[LimitOrder]:
     """Expire all GTD orders past their expires_at. Returns expired orders."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = _normalize_timestamp(datetime.now(timezone.utc).isoformat())
     rows = conn.execute(
         """\
         SELECT * FROM limit_orders
