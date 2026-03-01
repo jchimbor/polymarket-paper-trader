@@ -259,3 +259,5 @@ pytest tests/test_e2e_live.py    # live API integration tests only
 ## License
 
 MIT
+
+<!-- mcp-name: io.github.agent-next/polymarket-paper-trader -->
