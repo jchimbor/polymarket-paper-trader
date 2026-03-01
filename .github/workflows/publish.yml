@@ -1,4 +1,4 @@
-name: Publish to PyPI
+name: Publish
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
         if: matrix.python-version == '3.13'
         run: python -m pytest tests/ -x -q -m "not live" --cov=pm_trader --cov-report=term-missing --cov-fail-under=100
 
-  publish:
+  publish-pypi:
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -48,8 +48,31 @@ jobs:
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
 
+  publish-clawhub:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to ClawHub
+        run: |
+          npx clawhub auth login --token "$CLAWHUB_TOKEN" --no-browser
+          npx clawhub publish skill/polymarket-paper-trader \
+            --version "${{ steps.version.outputs.VERSION }}" \
+            --changelog "Release ${{ github.ref_name }}"
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+
   release:
-    needs: publish
+    needs: [publish-pypi, publish-clawhub]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -57,19 +80,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Generate release notes
-        id: notes
-        run: |
-          prev_tag=$(git tag --sort=-v:refname | sed -n '2p')
-          if [ -n "$prev_tag" ]; then
-            echo "NOTES<<EOF" >> "$GITHUB_OUTPUT"
-            git log --pretty=format:"- %s" "$prev_tag"..HEAD -- . ':!.github' >> "$GITHUB_OUTPUT"
-            echo "" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
-          else
-            echo "NOTES=Initial release" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
