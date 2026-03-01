@@ -32,7 +32,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["pm_trader*", "examples*"]
+include = ["pm_trader*"]
 
 [tool.pytest.ini_options]
 markers = ["live: tests requiring network access to Polymarket API"]
