@@ -116,7 +116,7 @@ class PolymarketClient:
         data = self._gamma_get("/markets", params={"slug": slug_or_id})
         if isinstance(data, list) and len(data) > 0:
             market_data = data[0]
-        elif isinstance(data, dict) and data.get("condition_id"):
+        elif isinstance(data, dict) and _has_condition_id(data):
             market_data = data
         else:
             # Try by condition_id
@@ -125,7 +125,7 @@ class PolymarketClient:
             )
             if isinstance(data, list) and len(data) > 0:
                 market_data = data[0]
-            elif isinstance(data, dict) and data.get("condition_id"):
+            elif isinstance(data, dict) and _has_condition_id(data):
                 market_data = data
             else:
                 raise MarketNotFoundError(slug_or_id)
@@ -152,7 +152,7 @@ class PolymarketClient:
         data = self._gamma_get("/markets", params=params)
         if not isinstance(data, list):
             return []
-        return [_parse_market(m) for m in data if m.get("condition_id")]
+        return [_parse_market(m) for m in data if _has_condition_id(m)]
 
     def search_markets(self, query: str, *, limit: int = 10) -> list[Market]:
         """Search markets by text query."""
@@ -161,7 +161,7 @@ class PolymarketClient:
         )
         if not isinstance(data, list):
             return []
-        return [_parse_market(m) for m in data if m.get("condition_id")]
+        return [_parse_market(m) for m in data if _has_condition_id(m)]
 
     # ------------------------------------------------------------------
     # CLOB API — prices, order book, fees, tick size
@@ -228,46 +228,77 @@ class PolymarketClient:
 # ---------------------------------------------------------------------------
 
 
+def _has_condition_id(data: dict) -> bool:
+    """Check if a response dict has a condition ID (camelCase or snake_case)."""
+    return bool(data.get("conditionId") or data.get("condition_id"))
+
+
 def _parse_market(data: dict) -> Market:
-    """Parse a Gamma API market response into a Market dataclass."""
-    # Parse tokens — Gamma returns a JSON string or list
-    tokens_raw = data.get("tokens", [])
-    if isinstance(tokens_raw, str):
-        tokens_raw = json.loads(tokens_raw)
+    """Parse a Gamma API market response into a Market dataclass.
 
-    tokens = []
-    for t in tokens_raw:
-        tokens.append({
-            "token_id": t.get("token_id", ""),
-            "outcome": t.get("outcome", ""),
-        })
+    Handles both camelCase (live API) and snake_case (cached/test) field names.
+    """
+    # Parse outcomes — can be JSON string or list
+    outcomes_raw = data.get("outcomes", [])
+    if isinstance(outcomes_raw, str):
+        outcomes_raw = json.loads(outcomes_raw)
+    outcomes = outcomes_raw if outcomes_raw else ["Yes", "No"]
 
-    # Parse outcome prices — can be string or list
+    # Parse outcome prices — can be JSON string or list
     outcome_prices_raw = data.get("outcomePrices", data.get("outcome_prices", []))
     if isinstance(outcome_prices_raw, str):
         outcome_prices_raw = json.loads(outcome_prices_raw)
     outcome_prices = [float(p) for p in outcome_prices_raw] if outcome_prices_raw else [0.0, 0.0]
 
-    # Parse outcomes
-    outcomes_raw = data.get("outcomes", [])
-    if isinstance(outcomes_raw, str):
-        outcomes_raw = json.loads(outcomes_raw)
+    # Parse tokens — Gamma API uses clobTokenIds (JSON string of IDs matching outcomes order)
+    # Also support the tokens list format used in tests/cache
+    tokens = []
+    clob_token_ids_raw = data.get("clobTokenIds")
+    tokens_raw = data.get("tokens")
+
+    if clob_token_ids_raw:
+        # Real Gamma API format: clobTokenIds is a JSON string like '["id1", "id2"]'
+        if isinstance(clob_token_ids_raw, str):
+            clob_token_ids_raw = json.loads(clob_token_ids_raw)
+        for i, token_id in enumerate(clob_token_ids_raw):
+            outcome_name = outcomes[i] if i < len(outcomes) else f"Outcome{i}"
+            tokens.append({
+                "token_id": str(token_id),
+                "outcome": outcome_name,
+            })
+    elif tokens_raw:
+        # Test/cached format: list of {"token_id": ..., "outcome": ...}
+        if isinstance(tokens_raw, str):
+            tokens_raw = json.loads(tokens_raw)
+        for t in tokens_raw:
+            tokens.append({
+                "token_id": t.get("token_id", ""),
+                "outcome": t.get("outcome", ""),
+            })
+
+    # condition_id: Gamma uses conditionId (camelCase)
+    condition_id = data.get("conditionId", data.get("condition_id", ""))
+
+    # tick size: Gamma uses orderPriceMinTickSize
+    tick_size_raw = data.get("orderPriceMinTickSize",
+                             data.get("minimum_tick_size", 0.01))
+    tick_size = float(tick_size_raw) if tick_size_raw else 0.01
 
     return Market(
-        condition_id=data.get("condition_id", ""),
+        condition_id=condition_id,
         slug=data.get("slug", ""),
         question=data.get("question", ""),
         description=data.get("description", ""),
-        outcomes=outcomes_raw if outcomes_raw else ["Yes", "No"],
+        outcomes=outcomes,
         outcome_prices=outcome_prices,
         tokens=tokens,
         active=bool(data.get("active", False)),
         closed=bool(data.get("closed", False)),
         volume=float(data.get("volume", 0) or 0),
         liquidity=float(data.get("liquidity", 0) or 0),
-        end_date=data.get("end_date_iso", data.get("end_date", "")),
+        end_date=data.get("endDateIso", data.get("end_date_iso", data.get("end_date", ""))),
         fee_rate_bps=int(data.get("fee_rate_bps", 0) or 0),
-        tick_size=float(data.get("minimum_tick_size", 0.01) or 0.01),
+        tick_size=tick_size,
     )
 
 
