@@ -616,3 +616,212 @@ class TestLimitOrderPriceEnforcement:
         filled = [r for r in results if r["action"] == "filled"]
         assert len(filled) == 1
         assert len(get_pending_orders(initialized_engine.db.conn)) == 0
+
+
+# ---------------------------------------------------------------------------
+# Additional engine edge case tests (coverage gaps)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateOutcome:
+    def test_empty_outcome_raises(self, initialized_engine: Engine):
+        with pytest.raises(InvalidOutcomeError):
+            initialized_engine._validate_outcome("")
+
+    def test_whitespace_only_raises(self, initialized_engine: Engine):
+        with pytest.raises(InvalidOutcomeError):
+            initialized_engine._validate_outcome("   ")
+
+
+class TestSellEdgeCases:
+    def test_sell_more_than_held(self, initialized_engine: Engine):
+        _mock_api(initialized_engine)
+        initialized_engine.buy("btc", "yes", 100.0)
+        with pytest.raises(OrderRejectedError, match="Cannot sell"):
+            initialized_engine.sell("btc", "yes", 99_999.0)
+
+    def test_sell_closed_market(self, initialized_engine: Engine):
+        _mock_api(initialized_engine)
+        initialized_engine.buy("btc", "yes", 100.0)
+        closed = Market(
+            condition_id="0xabc123",
+            slug="will-bitcoin-hit-100k",
+            question="Q",
+            description="",
+            outcomes=["Yes", "No"],
+            outcome_prices=[1.0, 0.0],
+            tokens=[
+                {"token_id": "tok_yes", "outcome": "Yes"},
+                {"token_id": "tok_no", "outcome": "No"},
+            ],
+            active=False,
+            closed=True,
+        )
+        initialized_engine.api.get_market = MagicMock(return_value=closed)
+        with pytest.raises(MarketClosedError):
+            initialized_engine.sell("btc", "yes", 10.0)
+
+    def test_sell_fok_rejected_on_empty_book(self, initialized_engine: Engine):
+        _mock_api(initialized_engine)
+        initialized_engine.buy("btc", "yes", 100.0)
+        empty_book = _make_book(bids=[], asks=[])
+        initialized_engine.api.get_order_book = MagicMock(return_value=empty_book)
+        with pytest.raises(OrderRejectedError, match="FOK rejected"):
+            initialized_engine.sell("btc", "yes", 10.0)
+
+
+class TestResolveMarket:
+    def test_resolve_closed_market_with_winner(self, initialized_engine: Engine):
+        _mock_api(initialized_engine)
+        # Buy YES shares
+        initialized_engine.buy("btc", "yes", 100.0)
+
+        # Market resolves — YES wins
+        resolved_market = Market(
+            condition_id="0xabc123",
+            slug="will-bitcoin-hit-100k",
+            question="Q",
+            description="",
+            outcomes=["Yes", "No"],
+            outcome_prices=[1.0, 0.0],
+            tokens=[
+                {"token_id": "tok_yes", "outcome": "Yes"},
+                {"token_id": "tok_no", "outcome": "No"},
+            ],
+            active=False,
+            closed=True,
+        )
+        initialized_engine.api.get_market = MagicMock(return_value=resolved_market)
+        results = initialized_engine.resolve_market("btc")
+        assert len(results) >= 1
+        # YES payout should be $1/share
+        yes_result = [r for r in results if r.position.outcome == "yes"]
+        assert len(yes_result) == 1
+        assert yes_result[0].payout > 0
+
+    def test_resolve_not_closed(self, initialized_engine: Engine):
+        _mock_api(initialized_engine)
+        with pytest.raises(MarketClosedError, match="not yet closed"):
+            initialized_engine.resolve_market("btc")
+
+    def test_resolve_no_position(self, initialized_engine: Engine):
+        closed = Market(
+            condition_id="0xclosed",
+            slug="closed-market",
+            question="Q",
+            description="",
+            outcomes=["Yes", "No"],
+            outcome_prices=[1.0, 0.0],
+            tokens=[
+                {"token_id": "t1", "outcome": "Yes"},
+                {"token_id": "t2", "outcome": "No"},
+            ],
+            active=False,
+            closed=True,
+        )
+        initialized_engine.api.get_market = MagicMock(return_value=closed)
+        with pytest.raises(NoPositionError):
+            initialized_engine.resolve_market("closed-market")
+
+
+class TestResolveAll:
+    def test_resolve_all_with_closed_market(self, initialized_engine: Engine):
+        _mock_api(initialized_engine)
+        # Buy YES shares
+        initialized_engine.buy("btc", "yes", 100.0)
+
+        # Market resolves — YES wins
+        resolved_market = Market(
+            condition_id="0xabc123",
+            slug="will-bitcoin-hit-100k",
+            question="Q",
+            description="",
+            outcomes=["Yes", "No"],
+            outcome_prices=[1.0, 0.0],
+            tokens=[
+                {"token_id": "tok_yes", "outcome": "Yes"},
+                {"token_id": "tok_no", "outcome": "No"},
+            ],
+            active=False,
+            closed=True,
+        )
+        initialized_engine.api.get_market = MagicMock(return_value=resolved_market)
+        results = initialized_engine.resolve_all()
+        assert len(results) >= 1
+
+
+class TestWatchPricesEdgeCases:
+    def test_watch_market_not_found(self, initialized_engine: Engine):
+        """Markets that can't be resolved are silently skipped."""
+        from pm_sim.models import MarketNotFoundError
+        initialized_engine.api.get_market = MagicMock(
+            side_effect=MarketNotFoundError("bad")
+        )
+        result = initialized_engine.watch_prices(["bad"])
+        assert result == []
+
+    def test_watch_api_price_error(self, initialized_engine: Engine):
+        """Price fetch errors are silently skipped for that market."""
+        _mock_api(initialized_engine)
+        initialized_engine.api.get_midpoint = MagicMock(side_effect=Exception("timeout"))
+        result = initialized_engine.watch_prices(["btc"])
+        assert result == []
+
+    def test_watch_default_outcome(self, initialized_engine: Engine):
+        """Without outcomes param, defaults to ['yes']."""
+        _mock_api(initialized_engine)
+        result = initialized_engine.watch_prices(["btc"])
+        assert len(result) == 1
+        assert result[0]["outcome"] == "yes"
+
+
+class TestLimitOrderExecution:
+    """Test the limit order fill execution paths."""
+
+    def test_sell_limit_fills_when_bid_above_limit(self, initialized_engine: Engine):
+        _mock_api(initialized_engine)
+        # First buy shares
+        initialized_engine.buy("btc", "yes", 100.0)
+        from pm_sim.orders import create_order, get_pending_orders
+
+        create_order(
+            initialized_engine.db.conn,
+            market_slug="will-bitcoin-hit-100k",
+            market_condition_id="0xabc123",
+            outcome="yes",
+            side="sell",
+            amount=10.0,
+            limit_price=0.50,  # Below best bid (0.64), so should fill
+        )
+        results = initialized_engine.check_orders()
+        filled = [r for r in results if r["action"] == "filled"]
+        assert len(filled) == 1
+        assert len(get_pending_orders(initialized_engine.db.conn)) == 0
+
+    def test_sell_limit_skips_when_bid_below_limit(self, initialized_engine: Engine):
+        _mock_api(initialized_engine)
+        initialized_engine.buy("btc", "yes", 100.0)
+        from pm_sim.orders import create_order, get_pending_orders
+
+        create_order(
+            initialized_engine.db.conn,
+            market_slug="will-bitcoin-hit-100k",
+            market_condition_id="0xabc123",
+            outcome="yes",
+            side="sell",
+            amount=10.0,
+            limit_price=0.90,  # Above best bid (0.64), so should NOT fill
+        )
+        results = initialized_engine.check_orders()
+        filled = [r for r in results if r["action"] == "filled"]
+        assert len(filled) == 0
+        assert len(get_pending_orders(initialized_engine.db.conn)) == 1
+
+
+class TestOrderTypeValidation:
+    def test_invalid_order_type_rejected(self, initialized_engine: Engine):
+        _mock_api(initialized_engine)
+        with pytest.raises(OrderRejectedError, match="Invalid order_type"):
+            initialized_engine.place_limit_order(
+                "btc", "yes", "buy", 100.0, 0.55, order_type="bad",
+            )
