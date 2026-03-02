@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # polymarket-paper-trader
 
 Paper trading simulator for Polymarket. Built for AI agents. Python 3.10+, SQLite, Click CLI, FastMCP.
@@ -5,11 +9,18 @@ Paper trading simulator for Polymarket. Built for AI agents. Python 3.10+, SQLit
 ## Commands
 
 ```bash
+# Install
+pip install -e ".[dev]"
+
 # Tests (615 tests, 100% coverage)
 python3 -m pytest tests/ -x -q -m "not live"            # fast, skip live API tests
 python3 -m pytest tests/ -v                              # verbose
 python3 -m pytest tests/ --cov=pm_trader --cov-report=term-missing  # coverage
 python3 -m pytest tests/test_e2e_live.py -v              # live API (requires network)
+
+# Single test file / single test
+python3 -m pytest tests/test_engine.py -x -q             # one file
+python3 -m pytest tests/test_engine.py::TestBuy::test_buy_yes -x -q  # one test
 
 # Run
 pm-trader init --balance 10000
@@ -47,6 +58,11 @@ mcp_server.py → engine.py (same stack, 30 MCP tools)
 - Each error has a `code` class attribute: `code = "INSUFFICIENT_BALANCE"`
 - CLI and MCP use JSON envelope: `{"ok": true, "data": {...}}` or `{"ok": false, "error": "msg", "code": "CODE"}`
 - Helper functions: `_ok(data)` and `_err(error, code)` in both cli.py and mcp_server.py
+
+### Shared helpers
+- `_market_to_dict(m)` in mcp_server.py — single serializer for Market→dict (used by all market-returning tools)
+- `_parse_market_list(data)` in api.py — shared parser for Gamma API market list responses
+- Don't cache empty API responses — guard with `len(data) > 0` before `_set_cached()`
 
 ### Key design decisions
 - **Fee formula**: `(bps/10000) * min(price, 1-price) * shares` — matches Polymarket exactly
